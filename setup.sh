@@ -1,0 +1,1 @@
+export SHAPE_RETRIEVAL="/home/meenalp/Desktop/PhD/shape_retrieval"
