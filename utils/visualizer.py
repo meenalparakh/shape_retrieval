@@ -1,6 +1,6 @@
 import meshcat
 import meshcat.geometry as g
-
+import numpy as np
 # from pyngrok import ngrok
 
 
@@ -12,12 +12,13 @@ class VizServer:
         self.mc_vis["meshcat"].delete()
         self.mc_vis["/"].delete()
 
-    def view_pcd(self, pts, colors=None, name="scene", size=2.0):
+    def view_pcd(self, pts, colors=None, name="scene", size=0.05):
         if colors is None:
-            colors = pts
+            colors = pts - np.min(pts, axis=0)
+            colors = colors / np.max(colors)
         # self.mc_vis["scene"].delete()
         self.mc_vis["scene/" + name].set_object(
-            g.PointCloud(pts.T, color=colors.T / 255.0, size=size)
+            g.PointCloud(pts.T, color=colors.T, size=size)
         )
 
     def close(self):

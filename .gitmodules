@@ -1,0 +1,3 @@
+[submodule "SparseLSH"]
+	path = SparseLSH
+	url = git@github.com:brandonrobertz/SparseLSH.git
