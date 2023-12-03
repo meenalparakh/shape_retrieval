@@ -6,3 +6,6 @@ def get_shapenet_dir():
 
 def get_results_dir():
     return Path(os.environ["SHAPE_RETRIEVAL"]) / "images"
+
+def get_runs_dir():
+    return Path(os.environ["SHAPE_RETRIEVAL"]) / "runs"

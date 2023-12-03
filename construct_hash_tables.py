@@ -39,8 +39,6 @@ def visualize_feature_vectors(feature_func: FeatureFunctions,
 
 
 def sparse_lsh_trial(categories):
-    # inputs: one of each category
-    
     feature_func = D2("D2")
     feature_size = 100
     hash_size = 10
@@ -78,14 +76,11 @@ def sparse_lsh_trial(categories):
     )
 
     lsh.index(X, extra_data=category_names[1:])
-
     # an example retrieval - using the same vector as input
     # Build a 1-D (single row) sparse matrix
     X_sim = csr_matrix(category_features_NB[:1, :])
     # find the point in X nearest to X_sim
     points = lsh.query(X_sim, num_results=1)
-    # from IPython import embed
-    # embed()
     # split up the first result into its parts
     print(f"points are: {points}")
     (point, label), dist = points[0]
