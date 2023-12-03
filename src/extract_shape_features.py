@@ -8,6 +8,7 @@ from utils.visualizer import VizServer
 from src.feature_functions import FeatureFunctions
 from utils.path_utils import get_results_dir
 
+
 def compute_shape_features(
     mesh: Trimesh,
     feature_func: FeatureFunctions,
@@ -20,7 +21,6 @@ def compute_shape_features(
     plot_histogram=False,
     obj_category=None,
 ) -> T.Tuple[np.array, np.array]:
-    
     if isinstance(pcd_size, float):
         num_vertices = len(mesh.vertices)
         num_points = int(num_vertices * pcd_size)
@@ -42,9 +42,9 @@ def compute_shape_features(
             viz_server = VizServer()
         viz_server.view_pcd(pts=pcd)
 
-    feature_vector, bins = feature_func.pcd_features(pcd, 
-                                                     num_samples=max_num_samples, 
-                                                     resolution=hist_resolution)
+    feature_vector, bins = feature_func.pcd_features(
+        pcd, num_samples=max_num_samples, resolution=hist_resolution
+    )
 
     if plot_histogram:
         # create the bins

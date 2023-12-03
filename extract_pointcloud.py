@@ -21,32 +21,6 @@ import random
 random.seed(0)
 np.random.seed(0)
 
-# TODO:
-# 1. code for computing features for one object - done
-# 2. visualize the features for different object categories:
-#    mug, laptop, can, airplane - done
-# 3. read LSH code from some github repository, or layout the plan on 
-#    how to implement it
-# 4. implement LSH 
-# 5. implement retrieval
-
-# MUST DO:
-# BASELINE - HOW DOES LSH COMPARE WITH NAIVE APPROACH
-# THEORETICALLY & EXPERIMENTALLY 
-# IN TERMS OF 
-# RUNTIME AND COMPUTE REQUIRED
-# AMMORTIZED 
-
-# 6. use PCA to plot the different groups - not sure if this will be useful
-#    but there is no harm in trying it out
-# 6. things to try - think of ways to visualize how different hyperparams 
-#    affect the object retrieval
-# 7. things to try - faster ways of computing histograms (complexity wise)
-# 8. things to try - different representations, espescially learned through 
-#    self-supervision on a subset of data
-# 9. things to pay attention to - try to search for new algorithms and
-#    add them to the implementation
-
 def visualize_feature_vectors(feature_func: FeatureFunctions, 
                               viz_server: VizServer=None, category: str="chair") -> None:
     category_dir = get_shapenet_dir() / category
