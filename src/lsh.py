@@ -16,12 +16,14 @@ from sparselsh.storage import storage, serialize, deserialize
 class MyLSH(object):
     def __init__(
         self,
-        hash_size,
         input_dim,
+        hash_size=32,
         num_hashtables=1,
         projection_dist="gaussian",
-        bin_function="binary",
+        bin_function="multiple",
         bin_param_r=3.0,
+        r1=1.0,
+        c=2.0,
         feature_func=None,
         storage_config=None,
     ):
@@ -38,8 +40,17 @@ class MyLSH(object):
         self.bin_function = bin_function
         self.bin_param_r = bin_param_r
         self.feature_func = feature_func
+        self.r2 = c * r1
 
         self.projection_dist = projection_dist
+        print(f"Projection Distribution: {projection_dist}\n"
+              f"Number of Tables: {num_hashtables}\n"
+              f"Input Dimension: {input_dim}\n"
+              f"Hash Key Dimension: {hash_size}\n"
+              f"Size of bins: {bin_param_r}\n"
+              f"Query threshold: {self.r2}\n"
+              f"Features: {feature_func.name}\n")
+
         self.projection_planes = self.get_hash_function(projection_dist)
 
         if storage_config is None:
@@ -56,8 +67,8 @@ class MyLSH(object):
                 )
             else:
                 return np.random.rand(
-                    self.num_hashtables, self.input_dim, 1
-                ), np.random.uniform(0, self.bin_param_r, self.num_hashtables)
+                    self.num_hashtables, self.input_dim, self.hash_size
+                ), np.random.uniform(0, self.bin_param_r, (self.num_hashtables, self.hash_size))
 
         if name == "cauchy":
             if self.bin_function == "binary":
@@ -66,8 +77,8 @@ class MyLSH(object):
                 )
             else:
                 return np.random.standard_cauchy(
-                    (self.num_hashtables, self.input_dim, 1)
-                ), np.random.uniform(0, self.bin_param_r, self.num_hashtables)
+                    (self.num_hashtables, self.input_dim, self.hash_size)
+                ), np.random.uniform(0, self.bin_param_r, (self.num_hashtables, self.hash_size))
 
     def _init_hashtables(self):
         """Initialize the hash tables such that each record will be in the
@@ -86,19 +97,21 @@ class MyLSH(object):
             # projection_planes has shape TDH: num_tables x input_dim x hash_size
             projections = input_points_1ND @ self.projection_planes
             assert projections.shape == (self.num_hashtables, N, self.hash_size)
-            keys = np.packbits((projections > 0), axis=-1)[:, :, 0]
-            assert keys.shape == (self.num_hashtables, N)
+            keys = np.packbits((projections > 0), axis=-1)
+            # assert keys.shape == (self.num_hashtables, N)
             return keys
         else:
-            # resulting projections has shape TN1
+            # resulting projections has shape TNH
             projections = input_points_1ND @ self.projection_planes[0]
             keys = np.floor_divide(
                 projections
-                + self.projection_planes[1].reshape(self.num_hashtables, 1, 1),
+                + self.projection_planes[1][:, np.newaxis, :],
                 self.bin_param_r,
-            )[:, :, 0]
-            assert keys.shape == (self.num_hashtables, N)
-            return keys
+            )
+            if np.any(keys > 255) or np.any(keys < 0):
+                print(f"WARNING: keys are outside 0-255 range. "
+                      f"the min and max are: {keys.min()} and {keys.max()}")
+            return keys.astype(np.uint8)
 
     def _bytes_string_to_array(self, hash_key):
         """Takes a hash key (bytes string) and turn it
@@ -109,17 +122,8 @@ class MyLSH(object):
         return np.array(list(hash_key))
 
     def index(self, input_points, extra_data=None):
-        """Index input points by adding them to the selected storage.
-
-        If `extra_data` is provided, it will become the value of the dictionary
-        {input_point: extra_data}, which in turn will become the value of the
-        hash table.
-
-        :param input_points:
-            A sparse CSR matrix. The dimension needs to be N x `input_dim`, N>0.
-        :param extra_data:
-            (optional) A list of values to associate with the points. Commonly
-            this is a target/class-value of some type.
+        """
+        Index input points by adding them to the selected storage.
         """
 
         N = len(input_points)
@@ -138,11 +142,14 @@ class MyLSH(object):
                     if extra_data is None
                     else (input_points[entry_idx], extra_data[entry_idx])
                 )
-                table.append_val(keys[table_idx, entry_idx], val)
-                
+                key = tuple(keys[table_idx, entry_idx])
+                table.append_val(key, val)
+
+        
     def query(
-        self, query_points, r1=1.0, r2=3.0,
+        self, query_points,
     ):
+        
         M = len(query_points)
         assert query_points.shape[1] == self.input_dim
         keys = self._hash(query_points)
@@ -155,7 +162,8 @@ class MyLSH(object):
             for query_idx in range(M):
                 if stop_flag[query_idx]:
                     continue
-                same_bin_points = table.get_list(keys[table_idx, query_idx])
+                key = tuple(keys[table_idx, query_idx])
+                same_bin_points = table.get_list(key)
                 close_points[query_idx].extend(same_bin_points)
                 if len(close_points[query_idx]) >= max_checks:
                     close_points[query_idx] = close_points[query_idx][:max_checks]
@@ -170,7 +178,7 @@ class MyLSH(object):
             elif self.projection_dist == "cauchy":
                 distances = np.linalg.norm(np.array(close_inputs) - query_points[query_idx:query_idx+1, :], axis=1, ord=1)
                 
-            if np.min(distances) < r2:
+            if np.min(distances) < self.r2:
                 idx = np.argmin(distances)
                 return distances[idx], close_points[query_idx][idx]
             else:

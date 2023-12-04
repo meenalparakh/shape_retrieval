@@ -13,8 +13,7 @@ from src.feature_functions import FeatureFunctions, D2
 from utils.path_utils import get_shapenet_dir
 from utils.image_utils import compare
 from src.extract_shape_features import compute_shape_features
-    
-# from SparseLSH.sparselsh import LSH
+
 from sparselsh import LSH
 
 import random

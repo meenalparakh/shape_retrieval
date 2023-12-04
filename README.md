@@ -5,7 +5,11 @@
 
 - __half done__ - *compare what does sparse matrix do, and if needed implement your variant as well - answer - useful if the key representation is binary - but not for projection - as my feature vector are not sparse - but need to look into how sparse they are*.
 
-- start writing code as per the lecture notes and everything that you can think of - if there is some parameter you don't know how to set - make it available throught the class argument.
+- __done__ - *start writing code as per the lecture notes and everything that you can think of - if there is some parameter you don't know how to set - make it available throught the class argument.*
+
+
+- steps for how to visualize the mapping
+take the tables
 
 - code for the following
    - visualization of the hash table - where does a point gets mapped to in the hash table 
