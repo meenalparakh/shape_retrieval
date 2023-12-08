@@ -17,24 +17,31 @@ from src.extract_shape_features import compute_shape_features
 from sparselsh import LSH
 
 import random
+
 random.seed(0)
 np.random.seed(0)
 
-def visualize_feature_vectors(feature_func: FeatureFunctions, 
-                              viz_server: VizServer=None, category: str="chair") -> None:
+
+def visualize_feature_vectors(
+    feature_func: FeatureFunctions,
+    viz_server: VizServer = None,
+    category: str = "chair",
+) -> None:
     category_dir = get_shapenet_dir() / category
     fnames = sorted(list(category_dir.glob("*.gltf")))
     print(f"Number of {category}: {len(fnames)}")
-    
+
     for chosen_mesh in range(2):
         print(f"Mesh used ({category}): {fnames[chosen_mesh]}")
         mesh = trimesh.load(fnames[chosen_mesh], file_type="gltf", force="mesh")
-        features, bins = compute_shape_features(mesh, 
-                            feature_func, 
-                            visualize_pcd=True, 
-                            viz_server=viz_server,
-                            plot_histogram=True,
-                            obj_category=category + f"_{chosen_mesh}")
+        features, bins = compute_shape_features(
+            mesh,
+            feature_func,
+            visualize_pcd=True,
+            viz_server=viz_server,
+            plot_histogram=True,
+            obj_category=category + f"_{chosen_mesh}",
+        )
 
 
 def sparse_lsh_trial(categories):
@@ -46,32 +53,34 @@ def sparse_lsh_trial(categories):
     for category in categories:
         category_dir = get_shapenet_dir() / category
         fnames = sorted(list(category_dir.glob("*.gltf")))
-        
+
         for chosen_mesh in range(3):
             mesh = trimesh.load(fnames[chosen_mesh], file_type="gltf", force="mesh")
-            features, bins = compute_shape_features(mesh, 
-                                feature_func, 
-                                max_num_samples=1000,
-                                hist_resolution=feature_size,
-                                visualize_pcd=False, 
-                                # viz_server=viz_server,
-                                plot_histogram=False,
-                                obj_category=category + f"_{chosen_mesh}")
-            
+            features, bins = compute_shape_features(
+                mesh,
+                feature_func,
+                max_num_samples=1000,
+                hist_resolution=feature_size,
+                visualize_pcd=False,
+                # viz_server=viz_server,
+                plot_histogram=False,
+                obj_category=category + f"_{chosen_mesh}",
+            )
+
             assert (len(bins) - 1) == feature_size
             category_features.append(features)
             category_names.append(category)
-    
+
     category_features_NB = np.array(category_features)
     # assert category_features_NB.shape == (len(categories), feature_size)
-    
+
     X = csr_matrix(category_features_NB[1:, :])
 
     lsh = LSH(
         hash_size=hash_size,
         input_dim=feature_size,
         num_hashtables=1,
-        storage_config={"dict": None}
+        storage_config={"dict": None},
     )
 
     lsh.index(X, extra_data=category_names[1:])
@@ -89,7 +98,7 @@ def sparse_lsh_trial(categories):
 if __name__ == "__main__":
     categories = ["can", "airplane", "laptop", "chair", "mug"]
     sparse_lsh_trial(categories)
-    
+
     # feature_func = D2("D2")
     # viz_server = VizServer()
 

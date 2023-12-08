@@ -43,13 +43,15 @@ class MyLSH(object):
         self.r2 = c * r1
 
         self.projection_dist = projection_dist
-        print(f"Projection Distribution: {projection_dist}\n"
-              f"Number of Tables: {num_hashtables}\n"
-              f"Input Dimension: {input_dim}\n"
-              f"Hash Key Dimension: {hash_size}\n"
-              f"Size of bins: {bin_param_r}\n"
-              f"Query threshold: {self.r2}\n"
-              f"Features: {feature_func.name}\n")
+        print(
+            f"Projection Distribution: {projection_dist}\n"
+            f"Number of Tables: {num_hashtables}\n"
+            f"Input Dimension: {input_dim}\n"
+            f"Hash Key Dimension: {hash_size}\n"
+            f"Size of bins: {bin_param_r}\n"
+            f"Query threshold: {self.r2}\n"
+            f"Features: {feature_func.name}\n"
+        )
 
         self.projection_planes = self.get_hash_function(projection_dist)
 
@@ -68,7 +70,9 @@ class MyLSH(object):
             else:
                 return np.random.rand(
                     self.num_hashtables, self.input_dim, self.hash_size
-                ), np.random.uniform(0, self.bin_param_r, (self.num_hashtables, self.hash_size))
+                ), np.random.uniform(
+                    0, self.bin_param_r, (self.num_hashtables, self.hash_size)
+                )
 
         if name == "cauchy":
             if self.bin_function == "binary":
@@ -78,7 +82,9 @@ class MyLSH(object):
             else:
                 return np.random.standard_cauchy(
                     (self.num_hashtables, self.input_dim, self.hash_size)
-                ), np.random.uniform(0, self.bin_param_r, (self.num_hashtables, self.hash_size))
+                ), np.random.uniform(
+                    0, self.bin_param_r, (self.num_hashtables, self.hash_size)
+                )
 
     def _init_hashtables(self):
         """Initialize the hash tables such that each record will be in the
@@ -104,13 +110,14 @@ class MyLSH(object):
             # resulting projections has shape TNH
             projections = input_points_1ND @ self.projection_planes[0]
             keys = np.floor_divide(
-                projections
-                + self.projection_planes[1][:, np.newaxis, :],
+                projections + self.projection_planes[1][:, np.newaxis, :],
                 self.bin_param_r,
             )
             if np.any(keys > 255) or np.any(keys < 0):
-                print(f"WARNING: keys are outside 0-255 range. "
-                      f"the min and max are: {keys.min()} and {keys.max()}")
+                print(
+                    f"WARNING: keys are outside 0-255 range. "
+                    f"the min and max are: {keys.min()} and {keys.max()}"
+                )
             return keys.astype(np.uint8)
 
     def _bytes_string_to_array(self, hash_key):
@@ -145,18 +152,17 @@ class MyLSH(object):
                 key = tuple(keys[table_idx, entry_idx])
                 table.append_val(key, val)
 
-        
     def query(
-        self, query_points,
+        self,
+        query_points,
     ):
-        
         M = len(query_points)
         assert query_points.shape[1] == self.input_dim
         keys = self._hash(query_points)
         max_checks = 4 * self.num_hashtables
         close_points = [[] for _ in M]
         stop_flag = [False for _ in M]
-        
+
         # collect all close points for all queries, and stop if 4xl points obtained
         for table_idx, table in enumerate(self.hash_tables):
             for query_idx in range(M):
@@ -168,16 +174,23 @@ class MyLSH(object):
                 if len(close_points[query_idx]) >= max_checks:
                     close_points[query_idx] = close_points[query_idx][:max_checks]
                     stop_flag[query_idx] = True
-                    
+
         # check distance from each of the collected points for each query
         # return the closest if distance is less than r_2
         for query_idx in range(M):
             close_inputs = [val[0] for val in close_points[query_idx]]
             if self.projection_dist == "gaussian":
-                distances = np.linalg.norm(np.array(close_inputs) - query_points[query_idx:query_idx+1, :], axis=1)
+                distances = np.linalg.norm(
+                    np.array(close_inputs) - query_points[query_idx : query_idx + 1, :],
+                    axis=1,
+                )
             elif self.projection_dist == "cauchy":
-                distances = np.linalg.norm(np.array(close_inputs) - query_points[query_idx:query_idx+1, :], axis=1, ord=1)
-                
+                distances = np.linalg.norm(
+                    np.array(close_inputs) - query_points[query_idx : query_idx + 1, :],
+                    axis=1,
+                    ord=1,
+                )
+
             if np.min(distances) < self.r2:
                 idx = np.argmin(distances)
                 return distances[idx], close_points[query_idx][idx]
