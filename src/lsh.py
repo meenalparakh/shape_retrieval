@@ -11,7 +11,8 @@ from scipy.spatial.distance import hamming
 from sklearn.metrics.pairwise import cosine_distances
 
 from sparselsh.storage import storage, serialize, deserialize
-
+import logging
+logging.basicConfig(level=logging.INFO)
 
 class MyLSH(object):
     def __init__(
@@ -43,14 +44,15 @@ class MyLSH(object):
         self.r2 = c * r1
 
         self.projection_dist = projection_dist
-        print(
-            f"Projection Distribution: {projection_dist}\n"
+        logging.info("________________________________________"
+            f"\nProjection Distribution: {projection_dist}\n"
             f"Number of Tables: {num_hashtables}\n"
             f"Input Dimension: {input_dim}\n"
             f"Hash Key Dimension: {hash_size}\n"
             f"Size of bins: {bin_param_r}\n"
             f"Query threshold: {self.r2}\n"
             f"Features: {feature_func.name}\n"
+            "________________________________________"
         )
 
         self.projection_planes = self.get_hash_function(projection_dist)
@@ -106,7 +108,7 @@ class MyLSH(object):
             keys = np.packbits((projections > 0), axis=-1)
             # assert keys.shape == (self.num_hashtables, N)
             return keys
-        else:
+        elif self.bin_function == "multiple":
             # resulting projections has shape TNH
             projections = input_points_1ND @ self.projection_planes[0]
             keys = np.floor_divide(
@@ -119,6 +121,10 @@ class MyLSH(object):
                     f"the min and max are: {keys.min()} and {keys.max()}"
                 )
             return keys.astype(np.uint8)
+        # else:
+        #     projections = input_points_1ND @ self.projection_planes[0]
+        #     projections
+
 
     def _bytes_string_to_array(self, hash_key):
         """Takes a hash key (bytes string) and turn it
@@ -132,7 +138,8 @@ class MyLSH(object):
         """
         Index input points by adding them to the selected storage.
         """
-
+        if isinstance(input_points, list):
+            input_points = np.stack(input_points)
         N = len(input_points)
         assert (
             input_points.shape[1] == self.input_dim
@@ -160,8 +167,8 @@ class MyLSH(object):
         assert query_points.shape[1] == self.input_dim
         keys = self._hash(query_points)
         max_checks = 4 * self.num_hashtables
-        close_points = [[] for _ in M]
-        stop_flag = [False for _ in M]
+        close_points = [[] for _ in range(M)]
+        stop_flag = [False for _ in range(M)]
 
         # collect all close points for all queries, and stop if 4xl points obtained
         for table_idx, table in enumerate(self.hash_tables):
@@ -177,7 +184,12 @@ class MyLSH(object):
 
         # check distance from each of the collected points for each query
         # return the closest if distance is less than r_2
+        results = []
         for query_idx in range(M):
+            if len(close_points[query_idx]) == 0:
+                results.append(None)
+                logging.info("No points in the same bin found")
+                continue
             close_inputs = [val[0] for val in close_points[query_idx]]
             if self.projection_dist == "gaussian":
                 distances = np.linalg.norm(
@@ -191,12 +203,15 @@ class MyLSH(object):
                     ord=1,
                 )
 
+            print(f"The closest point found is {np.min(distances):.2f} farther (need to be within {self.r2}).")
             if np.min(distances) < self.r2:
                 idx = np.argmin(distances)
-                return distances[idx], close_points[query_idx][idx]
+                results.append((distances[idx], close_points[query_idx][idx]))
             else:
-                return None
+                results.append(None)
 
+        return results
+    
     ### distance functions
     @staticmethod
     def hamming_dist(x, Y):

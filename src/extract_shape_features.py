@@ -29,7 +29,7 @@ def compute_shape_features(
 
     pcd, _ = trimesh.sample.sample_surface_even(mesh, num_points, radius=0.005)
     pcd = np.asarray(pcd)
-    print(f"PCD shape is {pcd.shape}, expected number of points {num_points}")
+    # print(f"PCD shape is {pcd.shape}, expected number of points {num_points}")
 
     if normalize:
         min_xyz = np.min(pcd, axis=0)

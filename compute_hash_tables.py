@@ -8,11 +8,14 @@ import trimesh
 import pickle
 import plotly.express as px
 from scipy.sparse import csr_matrix
+from tqdm import tqdm
+import logging
+logging.basicConfig(level=logging.INFO)
 
 from utils.visualizer import VizServer
-from src.feature_functions import FeatureFunctions, D2
-from utils.path_utils import get_shapenet_dir, get_runs_dir
-from utils.image_utils import compare
+from src.feature_functions import FeatureFunctions, Dist
+from utils.path_utils import get_shapenet_dir, get_runs_dir, get_class_pickle
+from utils.image_utils import compare, visualize_tables
 from src.extract_shape_features import compute_shape_features
 from src.set_hyperparams import compute_params
 
@@ -24,11 +27,16 @@ import random
 random.seed(0)
 np.random.seed(0)
 
+# add logging statements everywhere
 # For large scale object storage and retrieval:
-# 0. divide the dataset into objects for storage and those for query - done
-# 1. Compute features for all storage shapes - done
-# 2. index those points into the hash tables - done
-# 3. query points
+# TODO:
+# 1. scale up the testing a little - so that you can decide what parameters perform well
+# 2. think what visualizations are lacking
+#       right now, I am visualizing the mapping of points in a table
+#       need to think about the experiment for comparing different bin_pararm values
+#       
+# 4. start writing the report and collecting results
+
 
 
 def divide_objects(categories, run_dirname="run_1", ratio=0.01):
@@ -46,6 +54,8 @@ def divide_objects(categories, run_dirname="run_1", ratio=0.01):
         num_storage = len(fnames) - max(1, int(len(fnames) * ratio))
         storage_fnames[category] = fnames[:num_storage]
         query_fnames[category] = fnames[num_storage:]
+        # logging.info(f"")
+        
 
     (get_runs_dir() / run_dirname).mkdir(parents=True, exist_ok=True)
 
@@ -53,37 +63,44 @@ def divide_objects(categories, run_dirname="run_1", ratio=0.01):
     fname = get_runs_dir() / run_dirname / "storage_fnames.pkl"
     with open(fname, "wb") as f:
         pickle.dump(storage_fnames, f)
+    logging.info(f"Object list for hashing saved!")
 
     # store the query object list
     fname = get_runs_dir() / run_dirname / "query_fnames.pkl"
     with open(fname, "wb") as f:
         pickle.dump(query_fnames, f)
-
-    return fname
+    logging.info(f"Object list for querying saved!")        
 
 
 def save_mappings(
     feature_func,
     run_dirname,
     input_dim,
-    total_inputs,
+    # total_inputs,
     projection_dist="cauchy",
     bin_param_r=3.0,
     r1=1.0,
     c=2,
     batch_size=100,
+    pcd_size=0.5,
+    pdf_resolution=1000,
     bin_function="multiple",
+    max_objects_hashed=0,
 ):
     fname = get_runs_dir() / run_dirname / "storage_fnames.pkl"
     with open(fname, "rb") as f:
         storage_fnames = pickle.load(f)
+        
+    logging.info(f"Object list for hashing loaded!")
 
     p_norm = 1 if projection_dist == "cauchy" else 2
+    total_inputs = sum([len(cat_fnames) for _, cat_fnames in storage_fnames.items()])
     p1, p2, l, k, gamma = compute_params(
         total_inputs, p_norm, bin_param_r=bin_param_r, r1=r1, c=c
     )
+    logging.info(f"Parameters computed for n({total_inputs}): p1({p1:0.2f}), p2({p2:0.2f}), l({l}), k({k}), gamma({gamma:0.2f})")
+    logging.info(f"Initializing LSH class!")
 
-    # feature_func = D2("D2")
     lsh = MyLSH(
         hash_size=k,
         input_dim=input_dim,
@@ -92,18 +109,32 @@ def save_mappings(
         bin_function=bin_function,
         bin_param_r=bin_param_r,
         feature_func=feature_func,
+        r1=r1,
+        c=c,
     )
 
+    logging.info(f"Starting hashing objects with batch size {batch_size}")
     count = 0
     input_buffer = []
     extra_data_buffer = []
     for cat, cat_fnames in storage_fnames.items():
-        for fname in cat_fnames:
+        num_objects = len(cat_fnames)
+        if max_objects_hashed > 0:
+            n = min(num_objects, max_objects_hashed)
+            cat_fnames = cat_fnames[:n]
+            
+        logging.info(f"\Hashing {len(cat_fnames)} objects from {cat} category")
+        logging.basicConfig(level=logging.ERROR)
+        for fname in tqdm(cat_fnames):
             mesh_fname = get_shapenet_dir() / cat / fname
             mesh = trimesh.load(mesh_fname, file_type="gltf", force="mesh")
             features, bins = compute_shape_features(
                 mesh,
                 feature_func,
+                pcd_size=0.5,
+                max_num_samples=pdf_resolution,
+                hist_resolution=input_dim,
+                normalize=True,
                 visualize_pcd=False,
                 viz_server=None,
                 plot_histogram=False,
@@ -116,39 +147,58 @@ def save_mappings(
                 lsh.index(input_buffer, extra_data_buffer)
                 input_buffer = []
                 extra_data_buffer = []
+                
+        logging.basicConfig(level=logging.INFO)
+
 
     # index the remaining objects (less than batch_size)
     lsh.index(input_buffer, extra_data_buffer)
 
+    logging.info(f"Saving the LSH class")
     lsh_pickle = get_runs_dir() / run_dirname / "lsh.pkl"
     with open(lsh_pickle, "wb") as f:
         pickle.dump(lsh, f)
 
-    return lsh_pickle
+    return lsh, lsh_pickle
 
 
-def query_objects(run_dirname, r1, r2):
+def query_objects(run_dirname, pdf_resolution, max_queries=0):
+    
+    logging.info(f"Loading the LSH class ...")
     lsh_pickle = get_runs_dir() / run_dirname / "lsh.pkl"
     with open(lsh_pickle, "rb") as f:
         lsh: MyLSH = pickle.load(f)
 
+    logging.info(f"Loading objects for query ...")
     fname = get_runs_dir() / run_dirname / "query_fnames.pkl"
     with open(fname, "rb") as f:
         query_fnames = pickle.load(f)
 
+    cat_success_rates = {}    
+    
     for cat, cat_fnames in query_fnames.items():
-        for fname in cat_fnames:
+        n = len(cat_fnames)
+        if max_queries > 0:
+            n = min(max_queries, n)
+        
+        success_count = 0
+        for fname in cat_fnames[:n]:
             mesh_fname = get_shapenet_dir() / cat / fname
             mesh = trimesh.load(mesh_fname, file_type="gltf", force="mesh")
             features, bins = compute_shape_features(
                 mesh,
-                lsh.feature_func,
+                feature_func,
+                pcd_size=0.5,
+                max_num_samples=pdf_resolution,
+                hist_resolution=input_dim,
+                normalize=True,
                 visualize_pcd=False,
                 viz_server=None,
                 plot_histogram=False,
                 obj_category=None,
             )
-            result = lsh.query(features.reshape((1, -1)), r1=r1, r2=r2)
+            # query one input and take the result for that query
+            result = lsh.query(features.reshape((1, -1)))[0]
             if result is None:
                 print(f"Queried: {cat}, model: {fname[:5]}..., Result: Fail")
             else:
@@ -160,13 +210,52 @@ def query_objects(run_dirname, r1, r2):
                     f"Retrieved: \n\t{retrieved_category}, "
                     f"\n\tmodel: {retrieved_model}\n\tdistance: {dist}"
                 )
+                if retrieved_category == cat:
+                    success_count += 1
+                    
             print()
-
+        cat_success_rates[cat] = (success_count, n)
+        
+    print("__________________________________________________")    
+    print(f"SUCCESS RATES:")    
+    for cat, val in cat_success_rates.items():
+        print(f"\t{cat} ({val[1]} objects): {val[0]/val[1]:.2f}")
+    total_success = sum([val[0] for _, val in cat_success_rates.items()])
+    total_objects = sum([val[1] for _, val in cat_success_rates.items()])
+    print(f"\tTotal: {total_success / total_objects:.2f}")        
+    print("__________________________________________________")
 
 if __name__ == "__main__":
-    categories = ["can", "airplane"]
+    categories = ["can", "airplane", "chair"]
+    run_dirname = 'run_1'
+    feature_func = Dist("D2", ord=2)
+    input_dim = 100
+    
+    rerun = False
+    
+    if rerun:
+        divide_objects(categories, run_dirname, ratio=0.01)
+        lsh, lsh_pickle = save_mappings(feature_func=feature_func,
+                    run_dirname=run_dirname,
+                    input_dim=input_dim,
+                    projection_dist='cauchy',
+                    bin_param_r=100.0,
+                    r1=1.0,
+                    c=100.0,
+                    batch_size=100,
+                    pcd_size=0.2, 
+                    pdf_resolution=1000,
+                    bin_function='binary',
+                    max_objects_hashed=200)
+    else:       
+        logging.info(f"Loadint the previously saved class")
+        lsh_pickle = get_class_pickle(run_dirname)
+        with open(lsh_pickle, 'rb') as f:
+            lsh: MyLSH = pickle.load(f)
 
-    # feature_func = D2("D2")
+    visualize_tables(lsh.hash_tables, plot_type='scatter', max_tables=10)
+    query_objects(run_dirname, pdf_resolution=1000, max_queries=20)
+
     # viz_server = VizServer()
 
     # for category in categories:
