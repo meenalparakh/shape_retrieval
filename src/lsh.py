@@ -2,6 +2,7 @@
 from __future__ import print_function
 
 import os
+import time
 from operator import itemgetter
 from typing import Any
 
@@ -12,7 +13,9 @@ from sklearn.metrics.pairwise import cosine_distances
 
 from sparselsh.storage import storage, serialize, deserialize
 import logging
+
 logging.basicConfig(level=logging.INFO)
+
 
 class MyLSH(object):
     def __init__(
@@ -44,7 +47,8 @@ class MyLSH(object):
         self.r2 = c * r1
 
         self.projection_dist = projection_dist
-        logging.info("________________________________________"
+        logging.info(
+            "________________________________________"
             f"\nProjection Distribution: {projection_dist}\n"
             f"Number of Tables: {num_hashtables}\n"
             f"Input Dimension: {input_dim}\n"
@@ -125,7 +129,6 @@ class MyLSH(object):
         #     projections = input_points_1ND @ self.projection_planes[0]
         #     projections
 
-
     def _bytes_string_to_array(self, hash_key):
         """Takes a hash key (bytes string) and turn it
         into a numpy matrix we can do calculations with.
@@ -159,13 +162,52 @@ class MyLSH(object):
                 key = tuple(keys[table_idx, entry_idx])
                 table.append_val(key, val)
 
+    def brute_force_query(self, query_points, return_time=False):
+        start_time = time.time()
+        M = len(query_points)
+
+        results = []
+        for query in query_points:
+            assert query.shape == (self.input_dim,)
+
+            closest = (np.inf, "")
+            for table_idx, table in enumerate(self.hash_tables):
+                keys = table.keys()
+                for key in keys:
+                    vals = table.get_list(key)
+                    for val in vals:
+                        representation = val[0]
+                        assert representation.shape == (
+                            self.input_dim,
+                        ), f"The representation shape found to be {representation.shape}"
+                        if self.projection_dist == "cauchy":
+                            dist = np.linalg.norm(representation - query, ord=1)
+                        else:
+                            dist = np.linalg.norm(representation - query)
+                        if dist < closest[0]:
+                            closest = (dist, val)
+
+            results.append(closest)
+
+        time_taken = time.time() - start_time
+        logging.info(f"Time for brute force querying: {time_taken} s")
+        if return_time:
+            return results, time_taken
+        else:
+            return results
+
     def query(
         self,
         query_points,
+        return_time=False,
     ):
         M = len(query_points)
         assert query_points.shape[1] == self.input_dim
+
+        start_time = time.time()
         keys = self._hash(query_points)
+
+        start_time = time.time()
         max_checks = 4 * self.num_hashtables
         close_points = [[] for _ in range(M)]
         stop_flag = [False for _ in range(M)]
@@ -203,15 +245,22 @@ class MyLSH(object):
                     ord=1,
                 )
 
-            print(f"The closest point found is {np.min(distances):.2f} farther (need to be within {self.r2}).")
+            print(
+                f"The closest point found is {np.min(distances):.2f} farther (need to be within {self.r2})."
+            )
             if np.min(distances) < self.r2:
                 idx = np.argmin(distances)
                 results.append((distances[idx], close_points[query_idx][idx]))
             else:
                 results.append(None)
 
-        return results
-    
+        time_taken = time.time() - start_time
+        logging.info(f"Time for finding hash, and querying all tables: {time_taken} s")
+        if return_time:
+            return results, time_taken
+        else:
+            return results
+
     ### distance functions
     @staticmethod
     def hamming_dist(x, Y):
