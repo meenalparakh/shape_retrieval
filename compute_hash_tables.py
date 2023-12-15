@@ -31,22 +31,18 @@ np.random.seed(0)
 # add logging statements everywhere
 # For large scale object storage and retrieval:
 # TODO:
-# 1. scale up the testing a little - so that you can decide what parameters perform well
-# 2. think what visualizations are lacking
-#       right now, I am visualizing the mapping of points in a table
-#       need to think about the experiment for comparing different bin_pararm values
-#
 # 4. start writing the report and collecting results
+# check how many queries are there
 
 
-def divide_objects(categories, ratio=0.01):
+def divide_objects(categories, force=True, ratio=0.05):
     """
     ratio is for number of objects to keep for
     query within each category
     """
 
     fname = get_runs_dir() / "storage_fnames.pkl"
-    if fname.exists():
+    if fname.exists() and (not force):
         logging.info(
             f"Storage and query division possibly exists already - skipping this step!"
         )
@@ -62,6 +58,8 @@ def divide_objects(categories, ratio=0.01):
         num_storage = len(fnames) - max(1, int(len(fnames) * ratio))
         storage_fnames[category] = fnames[:num_storage]
         query_fnames[category] = fnames[num_storage:]
+        logging.info(f"Number of Queries: {len(query_fnames[category])}") 
+        logging.info(f"Number of storage: {len(storage_fnames[category])}")
         # logging.info(f"")
 
     get_runs_dir().mkdir(parents=True, exist_ok=True)
@@ -225,21 +223,21 @@ def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False)
             result = results[0]
             if result is None:
                 failed_count += 1
-                print(f"Queried: {cat}, model: {fname[:5]}..., Result: Fail")
+                # print(f"Queried: {cat}, model: {fname[:5]}..., Result: Fail")
             else:
                 dist, (_, extra_data) = result
                 extra_data: str = extra_data
                 retrieved_category, retrieved_model = extra_data.split("_", maxsplit=1)
-                print(
-                    f"Queried: {cat}, model: {fname[:5]}..., \n"
-                    f"Retrieved: \n\t{retrieved_category}, "
-                    f"\n\tmodel: {retrieved_model}\n\tdistance: {dist}"
-                )
+                # print(
+                #     f"Queried: {cat}, model: {fname[:5]}..., \n"
+                #     f"Retrieved: \n\t{retrieved_category}, "
+                #     f"\n\tmodel: {retrieved_model}\n\tdistance: {dist}"
+                # )
                 if retrieved_category == cat:
                     success_count += 1
                 distances.append(dist)
 
-            print()
+            # print()
         cat_success_rates[cat] = (success_count, n)
         cat_average_distance[cat] = np.mean(distances)
         cat_fails[cat] = failed_count / n
@@ -253,7 +251,8 @@ def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False)
     print(f"\tTotal: {total_success / total_objects:.2f}")
     print("__________________________________________________")
 
-    queries_results = {cat: (val[0] / val[1]) for cat, val in cat_success_rates.items()}
+    queries_results = {}
+    queries_results['cat_success_rate'] = {cat: (val[0] / val[1]) for cat, val in cat_success_rates.items()}
     queries_results["total_success_rate"] = total_success / total_objects
     queries_results["average_query_time"] = np.mean(total_query_time)
     queries_results['distance'] = cat_average_distance

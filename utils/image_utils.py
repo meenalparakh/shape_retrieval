@@ -3,9 +3,10 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np
 from sklearn.decomposition import PCA
-
-from utils.path_utils import get_results_dir
-
+import logging
+from utils.path_utils import get_results_dir, get_runs_dir
+from src.lsh import MyLSH
+import pickle
 
 def compare(categories, num_images, name="compare"):
     num_cols = len(categories)
@@ -27,12 +28,18 @@ def compare(categories, num_images, name="compare"):
     plt.savefig(get_results_dir() / f"{name}.png")
 
 
-def visualize_tables(hash_tables, plot_type="bar", max_tables=0):
-    l = len(hash_tables)
+def visualize_tables(dirname, plot_type="bar", max_tables=0, name='table'):
+    logging.info(f"Loading the LSH class ...")
+    lsh_pickle = get_runs_dir() / dirname / "lsh.pkl"
+    with open(lsh_pickle, "rb") as f:
+        lsh: MyLSH = pickle.load(f)
+
+    
+    l = len(lsh.hash_tables)
     if max_tables > 0:
         l = min(max_tables, l)
 
-    for table_idx, table in enumerate(hash_tables[:l]):
+    for table_idx, table in enumerate(lsh.hash_tables[:l]):
         keys = sorted(table.keys())
         keys_cat_counts = {}
         for idx, k in enumerate(keys):
@@ -46,9 +53,9 @@ def visualize_tables(hash_tables, plot_type="bar", max_tables=0):
                 keys_cat_counts[cat][idx] = count
         # if plot_type == "bar":
         if True:
-            table_bar_graph(table_idx, keys, keys_cat_counts)
+            table_bar_graph(f"{name}_{table_idx}", keys, keys_cat_counts)
             # else:
-            table_pca_scatter_plot(table_idx, keys, keys_cat_counts)
+            # table_pca_scatter_plot(table_idx, keys, keys_cat_counts)
 
 
 def table_bar_graph(table_idx, keys, keys_cat_counts):
@@ -173,7 +180,7 @@ def time_distance_graph(
     distances: T.Dict[str, T.List[float]],
     query_time: T.List[float],
 ):
-    categories = sorted(list(performance.keys()))
+    categories = sorted(list(distances.keys()))
     num_cats = len(categories)
 
     # different colors correspond to different categories
@@ -184,17 +191,18 @@ def time_distance_graph(
         fig.add_trace(
             go.Bar(
                 x=categories,
-                y=[performance[cat][idx] for cat in categories],
+                y=[distances[cat][idx] for cat in categories],
                 name=f"{method} ({query_time[idx]} s)",
             )
         )
-    fig.write_image(get_results_dir() / f"perf_time_method_bar.png")
+    fig.write_image(get_results_dir() / f"dist_time_method_bar.png")
 
 def perf_time_variable(
     variables: T.List,
     performance: T.Dict[str, T.List[float]],
     query_time: T.List[float],
-    variable_name: str,
+    x_var: str,
+    y_var: str,
     log_x=False,
 ):
     categories = sorted(list(performance.keys()))
@@ -214,15 +222,23 @@ def perf_time_variable(
         )
     if log_x:
         fig.update_xaxes(type="log")
-
-    fig.write_image(get_results_dir() / f"perf_{variable_name}.png")
+    fig.update_layout(
+        xaxis_title=f"{x_var}",
+        yaxis_title=f"{y_var}",
+        yaxis_range=[0, 1.0],
+    )
+    fig.write_image(get_results_dir() / f"{y_var}_{x_var}.png")
 
     fig = go.Figure(
         go.Scatter(x=variables, y=query_time, mode="lines+markers")
     )
     if log_x:
         fig.update_xaxes(type="log")
-    fig.write_image(get_results_dir() / f"time_{variable_name}.png")
+    fig.update_layout(
+        xaxis_title=f"{x_var}",
+        yaxis_title="query time (s)",
+    )
+    fig.write_image(get_results_dir() / f"time_{x_var}.png")
 
 
 def perf_time_inp_dim(
@@ -231,7 +247,7 @@ def perf_time_inp_dim(
     query_time: T.List[float],
 ):
     perf_time_variable(
-        input_dims, performance, query_time, variable_name="input_dim", log_x=False
+        input_dims, performance, query_time, x_var="input_dim", y_var="performance", log_x=False
     )
 
 

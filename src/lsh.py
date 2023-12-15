@@ -190,7 +190,7 @@ class MyLSH(object):
             results.append(closest)
 
         time_taken = time.time() - start_time
-        logging.info(f"Time for brute force querying: {time_taken} s")
+        # logging.info(f"Time for brute force querying: {time_taken} s")
         if return_time:
             return results, time_taken
         else:
@@ -245,9 +245,9 @@ class MyLSH(object):
                     ord=1,
                 )
 
-            print(
-                f"The closest point found is {np.min(distances):.2f} farther (need to be within {self.r2})."
-            )
+            # print(
+            #     f"The closest point found is {np.min(distances):.2f} farther (need to be within {self.r2})."
+            # )
             if np.min(distances) < self.r2:
                 idx = np.argmin(distances)
                 results.append((distances[idx], close_points[query_idx][idx]))
@@ -255,7 +255,7 @@ class MyLSH(object):
                 results.append(None)
 
         time_taken = time.time() - start_time
-        logging.info(f"Time for finding hash, and querying all tables: {time_taken} s")
+        # logging.info(f"Time for finding hash, and querying all tables: {time_taken} s")
         if return_time:
             return results, time_taken
         else:
