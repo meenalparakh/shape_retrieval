@@ -15,13 +15,14 @@ logging.basicConfig(level=logging.INFO)
 
 from utils.visualizer import VizServer
 from src.feature_functions import FeatureFunctions, Dist
-from utils.path_utils import get_shapenet_dir, get_runs_dir, get_class_pickle
+from utils.path_utils import get_shapenet_dir, get_runs_dir, get_class_pickle, get_features_dir
 from utils.image_utils import compare, visualize_tables
 from src.extract_shape_features import compute_shape_features
 from src.set_hyperparams import compute_params
-
+import utils.path_utils as pu
 # from SparseLSH.sparselsh import LSH
 from src.lsh import MyLSH
+import plotly.express as px
 
 import random
 
@@ -34,7 +35,10 @@ np.random.seed(0)
 # 4. start writing the report and collecting results
 # check how many queries are there
 
+import typing as T
 
+    # fig.write_image('distance_categories.png')
+    
 def divide_objects(categories, force=True, ratio=0.05):
     """
     ratio is for number of objects to keep for
@@ -168,8 +172,24 @@ def save_mappings(
 
     return lsh, lsh_pickle
 
-
-def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False):
+def wrap_get_feature_dir(name):
+    # if name == "D2"
+    if name == "D1":
+        return pu.get_features_dir_d1()
+    elif name == "Angle":
+        return pu.get_features_dir_angle()
+    elif name == 'Area':
+        return pu.get_features_dir_area()
+    elif name == "Volume":
+        return pu.get_features_dir_volume()
+    else:
+        # default: D2
+        return pu.get_features_dir()
+        
+def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False, feature_dir=None):
+    random.seed(0)
+    np.random.seed(0)
+    
     logging.info(f"Loading the LSH class ...")
     lsh_pickle = get_runs_dir() / run_dirname / "lsh.pkl"
     with open(lsh_pickle, "rb") as f:
@@ -196,18 +216,28 @@ def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False)
         for fname in cat_fnames[:n]:
             mesh_fname = get_shapenet_dir() / cat / fname
             mesh = trimesh.load(mesh_fname, file_type="gltf", force="mesh")
-            features, bins = compute_shape_features(
-                mesh,
-                lsh.feature_func,
-                pcd_size=0.5,
-                max_num_samples=pdf_resolution,
-                hist_resolution=lsh.input_dim,
-                normalize=True,
-                visualize_pcd=False,
-                viz_server=None,
-                plot_histogram=False,
-                obj_category=None,
-            )
+            wrap_get_feature_dir(feature_dir).mkdir(exist_ok=True, parents=True)
+            path = wrap_get_feature_dir(feature_dir) / f"{cat}_{fname}.pkl"
+            if path.exists():
+                with open(path, 'rb') as f:                
+                    features, bins = pickle.load(f)
+            else:
+                print("COPMUTING FEATURES")
+                features, bins = compute_shape_features(
+                    mesh,
+                    lsh.feature_func,
+                    pcd_size=0.5,
+                    max_num_samples=pdf_resolution,
+                    hist_resolution=lsh.input_dim,
+                    normalize=True,
+                    visualize_pcd=False,
+                    viz_server=None,
+                    plot_histogram=False,
+                    obj_category=None,
+                )
+                with open(path, 'wb') as f:
+                    pickle.dump((features, bins), f)
+            
             # query one input and take the result for that query
 
             if brute_force:
@@ -258,49 +288,40 @@ def query_objects(run_dirname, pdf_resolution, max_queries=0, brute_force=False)
     queries_results['distance'] = cat_average_distance
     queries_results['failed_count'] = cat_fails
 
-    with open(get_runs_dir() / run_dirname / "query_results.pkl", 'wb') as f:
+
+    path = get_runs_dir() / run_dirname / "query_results.pkl"
+    if brute_force:
+        path = get_runs_dir() / run_dirname / "query_results_brute.pkl"
+    with open(path, 'wb') as f:
         pickle.dump(queries_results, f)
 
     return queries_results
 
 
 if __name__ == "__main__":
-    categories = ["can", "airplane", "chair"]
+    categories = ["can", "airplane"]
     run_dirname = "run_1"
     feature_func = Dist("D2", ord=2)
     input_dim = 100
+    max_objects_hashed = 100 # per category
+    max_objects_queried = 10 # per category
 
-    rerun = False
+    # divides the entire dataset into storage and query objects
+    divide_objects(categories, ratio=0.01)
+    lsh, lsh_pickle = save_mappings(
+        feature_func=feature_func,
+        run_dirname=run_dirname,
+        input_dim=input_dim,
+        projection_dist="cauchy",
+        bin_param_r=100.0,
+        r1=1.0,
+        c=100.0,
+        batch_size=100,
+        pcd_size=0.2,
+        pdf_resolution=1000,
+        bin_function="binary",
+        max_objects_hashed=max_objects_hashed,
+    )
 
-    if rerun:
-        divide_objects(categories, ratio=0.01)
-        lsh, lsh_pickle = save_mappings(
-            feature_func=feature_func,
-            run_dirname=run_dirname,
-            input_dim=input_dim,
-            projection_dist="cauchy",
-            bin_param_r=100.0,
-            r1=1.0,
-            c=100.0,
-            batch_size=100,
-            pcd_size=0.2,
-            pdf_resolution=1000,
-            bin_function="binary",
-            max_objects_hashed=200,
-        )
-    else:
-        logging.info(f"Loadint the previously saved class")
-        lsh_pickle = get_class_pickle(run_dirname)
-        with open(lsh_pickle, "rb") as f:
-            lsh: MyLSH = pickle.load(f)
-
-    visualize_tables(lsh.hash_tables, plot_type="scatter", max_tables=10)
-    query_objects(run_dirname, pdf_resolution=1000, max_queries=20)
-
-    # viz_server = VizServer()
-
-    # for category in categories:
-    #    visualize_feature_vectors(feature_func, viz_server, category)
-    #    print("\n")
-
-    # compare(categories, 2)
+    visualize_tables(run_dirname, plot_type="bar", max_tables=10)
+    query_objects(run_dirname, pdf_resolution=1000, max_queries=max_objects_queried)

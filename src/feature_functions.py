@@ -222,3 +222,5 @@ class Volume(FeatureFunctions):
             volume, bins=resolution, density=True, range=(0.0, 0.50)
         )
         return hist, bin_edges
+
+    

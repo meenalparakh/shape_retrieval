@@ -1,32 +1,118 @@
+import os
+import random
 import typing as T
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np
 from sklearn.decomposition import PCA
 import logging
-from utils.path_utils import get_results_dir, get_runs_dir
+
+import trimesh
+from src.extract_shape_features import compute_shape_features
+from src.feature_functions import FeatureFunctions
+from utils.path_utils import get_results_dir, get_runs_dir, get_shapenet_dir
 from src.lsh import MyLSH
 import pickle
+import plotly.express as px
 
 def compare(categories, num_images, name="compare"):
     num_cols = len(categories)
     num_rows = num_images
 
-    plt.figure(figsize=(3 * num_cols, 4 * num_images))
+    plt.figure(figsize=(3 * 3, 4 * 2))
     for col_idx, category in enumerate(categories):
-        for row_idx in range(num_rows):
-            histogram = get_results_dir() / f"histogram_{category}_{row_idx}.png"
-            img = plt.imread(histogram)
+        histogram = get_results_dir() / f"histogram_{category}.png"
+        img = plt.imread(histogram)
 
-            plt.subplot(num_rows, num_cols, 1 + col_idx + num_cols * row_idx)
-            plt.imshow(img)
-            plt.axis("off")
+        plt.subplot(2, 3, 1 + col_idx)
+        plt.imshow(img)
+        plt.axis("off")
 
     plt.subplots_adjust(
         left=0.00, bottom=0.01, right=1.0, top=0.99, wspace=0.01, hspace=0.01
     )
-    plt.savefig(get_results_dir() / f"{name}.png")
+    plt.show()
+    # plt.savefig(get_results_dir() / f"{name}.png")
 
+
+def visualize_feature_vectors(
+    feature_func: FeatureFunctions,
+    categories: T.List[str],
+    num_images: int = 2,
+):
+    # collect all image pairs
+    im_fnames = {}
+    num_cat = len(categories)
+    for cat in categories:
+        category_dir = get_shapenet_dir() / cat
+        print(f"Category: {cat}")
+        fnames = (list(category_dir.glob("*.gltf")))
+        random.shuffle(fnames)
+        fnames = fnames[:2]
+        im_fnames[cat] = {}
+        im_fnames[cat]['fnames'] = fnames
+        im_fnames[cat]['features'] = []
+        
+        for idx, fn in enumerate(fnames):
+            print(f"\t{str(fn).split(os.sep)[-1]}")
+            mesh = trimesh.load(fn, file_type="gltf", force="mesh")
+            features, bins = compute_shape_features(
+                mesh,
+                feature_func,
+                pcd_size=0.5,
+                max_num_samples=int(1e3),
+                hist_resolution=100,
+                normalize=True,
+                visualize_pcd=False,
+                viz_server=None,
+                plot_histogram=False,
+                obj_category=None,
+            )
+            im_fnames[cat]['features'].append(features)
+
+    distances = np.zeros((num_cat, num_cat))
+    for idx, cat in enumerate(categories):
+        for idx2, cat2 in enumerate(categories):
+            f1 = im_fnames[cat]['features'][0]
+            f2 = im_fnames[cat2]['features'][1]
+            dist = np.linalg.norm(f1 - f2, ord=2)
+            distances[idx, idx2] = dist
+
+    distances = distances / np.max(distances)
+    
+    fig = px.imshow(distances,
+                    x=[f"{cat}_1" for cat in categories], 
+                    y=[f"{cat}_2" for cat in categories])
+    
+    fig.write_image('distance_categories.png')
+    
+
+def visualize_feature_vectors_diff_funcs(
+    feature_functions: FeatureFunctions,
+    cat,
+):
+    # collect all image pairs
+    category_dir = get_shapenet_dir() / cat
+    print(f"Category: {cat}")
+    fnames = (list(category_dir.glob("*.gltf")))
+    random.shuffle(fnames)
+    fname = fnames[0]
+            
+    for feature_func in feature_functions:
+        mesh = trimesh.load(fname, file_type="gltf", force="mesh")
+        features, bins = compute_shape_features(
+                mesh,
+                feature_func,
+                pcd_size=0.5,
+                max_num_samples=int(1e3),
+                hist_resolution=100,
+                normalize=True,
+                visualize_pcd=False,
+                viz_server=None,
+                plot_histogram=True,
+                obj_category=f"{feature_func.name}",
+            )
+    compare([fn.name for fn in feature_functions], 1, 'compare_func')
 
 def visualize_tables(dirname, plot_type="bar", max_tables=0, name='table'):
     logging.info(f"Loading the LSH class ...")
@@ -61,7 +147,7 @@ def visualize_tables(dirname, plot_type="bar", max_tables=0, name='table'):
 def table_bar_graph(table_idx, keys, keys_cat_counts):
     all_categories = sorted(list(keys_cat_counts.keys()))
     # key_names = [str(k) for k in range(len(keys))]
-    key_names = [f"{k}_{val}" for k, val in enumerate(keys)]
+    key_names = [f"{k}" for k, val in enumerate(keys)]
 
     fig = go.Figure()
 
@@ -131,25 +217,25 @@ def performance_time_graph(
     for idx, method in enumerate(methods):
         for cat in categories:
             method_data[method]["performance"].append(performance[cat][idx])
-            method_data[method]["time"].append(query_time[cat][idx])
+            method_data[method]["time"].append(query_time[idx])
 
     fig = go.Figure()
 
     for method_idx, method in enumerate(methods):
         fig.add_trace(
-            data=go.Scatter(
+            go.Scatter(
                 mode="markers",
-                x=method_data[method]["performance"],
-                y=method_data[method]["time"],
-                log_y=True,
+                x=method_data[method]["time"],
+                y=method_data[method]["performance"],
                 marker=dict(
                     color=colors,
                     symbol=markers[method_idx],
-                    name=method,
-                    text=categories,
+                    size=10.0
                 ),
+                name=method,
             )
         )
+    fig.update_xaxes(type="log")
     fig.write_image(get_results_dir() / f"perf_time_method.png")
 
 
@@ -170,9 +256,13 @@ def performance_time_bargraph(
             go.Bar(
                 x=categories,
                 y=[performance[cat][idx] for cat in categories],
-                name=f"{method} ({query_time[idx]} s)",
+                name=f"{method} ({query_time[idx]:.1E} s)",
             )
         )
+    fig.update_layout(
+        xaxis_title=f"Object Categories",
+        yaxis_title=f"Success Rate",
+    )
     fig.write_image(get_results_dir() / f"perf_time_method_bar.png")
 
 def time_distance_graph(
@@ -192,9 +282,13 @@ def time_distance_graph(
             go.Bar(
                 x=categories,
                 y=[distances[cat][idx] for cat in categories],
-                name=f"{method} ({query_time[idx]} s)",
+                name=f"{method} ({query_time[idx]:.1E} s)",
             )
         )
+    fig.update_layout(
+        xaxis_title=f"Object Categories",
+        yaxis_title=f"Distance",
+    )
     fig.write_image(get_results_dir() / f"dist_time_method_bar.png")
 
 def perf_time_variable(
@@ -203,6 +297,7 @@ def perf_time_variable(
     query_time: T.List[float],
     x_var: str,
     y_var: str,
+    yaxis_range=None,
     log_x=False,
 ):
     categories = sorted(list(performance.keys()))
@@ -225,8 +320,11 @@ def perf_time_variable(
     fig.update_layout(
         xaxis_title=f"{x_var}",
         yaxis_title=f"{y_var}",
-        yaxis_range=[0, 1.0],
     )
+    if yaxis_range:
+        fig.update_layout(
+            yaxis_range=yaxis_range,
+        )
     fig.write_image(get_results_dir() / f"{y_var}_{x_var}.png")
 
     fig = go.Figure(
@@ -262,7 +360,11 @@ def perf_time_num_samples(
 
 
 def perf_types(
-    choices: T.List[str], performance: T.Dict[str, T.List[float]], choice_name: str
+    choices: T.List[str], 
+    performance: T.Dict[str, T.List[float]], 
+    query_time: T.List[float],
+    choice_name: str,
+    perf_name: str,
 ):
     categories = list(performance.keys())
     num_cats = len(categories)
@@ -273,8 +375,17 @@ def perf_types(
             go.Bar(
                 x=categories,
                 y=[performance[cat][idx] for cat in categories],
-                name=choice,
+                name=f"{choice} ({query_time[idx]:.1E} s)",
             )
+        )
+        
+    fig.update_layout(
+        xaxis_title=f"{choice_name}",
+        yaxis_title=f"{perf_name}",
+    )
+    if perf_name == "Success Rate" or perf_name == "success rate":
+        fig.update_layout(
+            yaxis_range=[0.0, 1.2],
         )
     # for cat in categories:
     # fig.add_trace(
@@ -284,7 +395,7 @@ def perf_types(
     #         name=cat,
     #     )
     # )
-    fig.write_image(get_results_dir() / f"perf_{choice_name}.png")
+    fig.write_image(get_results_dir() / f"{perf_name}_{choice_name}.png")
 
 
 def perf_feature_funcs(feature_functions, performance):
